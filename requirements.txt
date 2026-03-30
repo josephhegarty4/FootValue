@@ -1,0 +1,9 @@
+pandas>=2.2.0
+rapidfuzz>=3.9.0
+lxml>=4.9.0,<5.0; python_version < "3.14"
+lxml>=5.2.0; python_version >= "3.14"
+requests>=2.32.0
+soccerdata==1.5.1; python_version < "3.14"
+setuptools>=68.0.0; python_version < "3.14"
+Flask>=3.0.0
+pytest>=8.2.0
