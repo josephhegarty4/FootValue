@@ -5,9 +5,12 @@ from pathlib import Path
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
+from src.db.sqlite_store import load_dataset
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAW_CSV = PROJECT_ROOT / "src/data/raw/fbref_epl_2022-2023_players.csv"
 JOINED_CSV = PROJECT_ROOT / "src/data/processed/phase1_joined_epl_2022-2023.csv"
+DATABASE_PATH = PROJECT_ROOT / "src/data/footvalue.db"
 
 app = Flask(__name__, template_folder="templates")
 
@@ -20,6 +23,10 @@ def _load_csv(path: Path) -> pd.DataFrame:
 
 
 def _dataset_from_source(source: str) -> pd.DataFrame:
+    database_df = load_dataset(DATABASE_PATH, source)
+    if not database_df.empty:
+        return database_df.fillna("")
+
     if source == "joined":
         return _load_csv(JOINED_CSV)
     return _load_csv(RAW_CSV)

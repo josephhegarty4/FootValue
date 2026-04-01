@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pandas as pd
 import requests
@@ -49,16 +50,42 @@ def _normalize_fbref_columns(dataframe: pd.DataFrame, season: str) -> pd.DataFra
         "Squad": "club",
         "Team": "club",
         "Nation": "nation",
+        "Position": "position",
         "Pos": "position",
         "Age": "age",
         "Born": "birth_year",
+        "Minutes": "minutes",
         "90s": "minutes_90s",
+        "Goals": "goals",
         "Gls": "goals",
+        "Assists": "assists",
         "Ast": "assists",
+        "Expected Goals (xG)": "expected_goals",
         "xG": "expected_goals",
+        "Expected Assists (xAG)": "expected_assists",
         "xAG": "expected_assists",
     }
     dataframe = dataframe.rename(columns={key: value for key, value in rename_map.items() if key in dataframe.columns})
+
+    # Keep all available stat columns while normalizing names.
+    seen: dict[str, int] = {}
+    normalized_columns: list[str] = []
+    for column in dataframe.columns:
+        base = str(column).strip().lower()
+        base = re.sub(r"[^a-z0-9]+", "_", base)
+        base = re.sub(r"_+", "_", base).strip("_") or "column"
+        if base in seen:
+            seen[base] += 1
+            normalized = f"{base}_{seen[base]}"
+        else:
+            seen[base] = 1
+            normalized = base
+        normalized_columns.append(normalized)
+    dataframe.columns = normalized_columns
+
+    if "minutes_90s" not in dataframe.columns and "minutes" in dataframe.columns:
+        minutes = pd.to_numeric(dataframe["minutes"], errors="coerce")
+        dataframe["minutes_90s"] = minutes / 90.0
 
     required_columns = [
         "player_name",
@@ -77,7 +104,9 @@ def _normalize_fbref_columns(dataframe: pd.DataFrame, season: str) -> pd.DataFra
         if column not in dataframe.columns:
             dataframe[column] = pd.NA
 
-    dataframe = dataframe[required_columns].copy()
+    # Ensure required columns come first but keep every other stat column too.
+    additional_columns = [column for column in dataframe.columns if column not in required_columns]
+    dataframe = dataframe[required_columns + additional_columns].copy()
     dataframe["league"] = "EPL"
     dataframe["season"] = season
     return dataframe

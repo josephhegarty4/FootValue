@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.db.sqlite_store import save_phase1_data
 from src.scrapers.fbref import fetch_fbref_player_stats
 from src.scrapers.transfermarkt import (
     bootstrap_transfermarkt_templates,
@@ -16,6 +17,31 @@ from src.utils.inflation import build_linear_proxy_index, normalize_fee
 from src.utils.name_matching import fuzzy_join
 
 
+def _resolve_mirror_csv_path(
+    fbref_mirror_csv: str | Path | None,
+    auto_fbref_mirror: bool,
+    incoming_dir: str | Path,
+) -> str | Path | None:
+    if fbref_mirror_csv is not None:
+        return fbref_mirror_csv
+    if not auto_fbref_mirror:
+        return None
+
+    incoming_path = Path(incoming_dir)
+    if not incoming_path.exists():
+        raise FileNotFoundError(f"Incoming directory not found: {incoming_path}")
+
+    csv_files = sorted(
+        [path for path in incoming_path.glob("*.csv") if path.is_file()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in incoming directory: {incoming_path}")
+
+    return csv_files[0]
+
+
 def run_phase1_pipeline(
     league: str = "EPL",
     season: str = "2022-2023",
@@ -25,11 +51,20 @@ def run_phase1_pipeline(
     strict_soccerdata: bool = False,
     force_refresh_fbref: bool = False,
     fbref_mirror_csv: str | Path | None = None,
+    auto_fbref_mirror: bool = False,
+    incoming_dir: str | Path = "src/data/raw/incoming",
     min_fbref_rows: int = 0,
+    db_path: str | Path = "src/data/footvalue.db",
 ) -> dict[str, Path]:
     raw_directory = Path(raw_dir)
     processed_directory = Path(processed_dir)
     processed_directory.mkdir(parents=True, exist_ok=True)
+
+    mirror_csv_source = _resolve_mirror_csv_path(
+        fbref_mirror_csv=fbref_mirror_csv,
+        auto_fbref_mirror=auto_fbref_mirror,
+        incoming_dir=incoming_dir,
+    )
 
     fbref_df = fetch_fbref_player_stats(
         league=league,
@@ -37,7 +72,7 @@ def run_phase1_pipeline(
         raw_dir=raw_directory,
         force_refresh=force_refresh_fbref,
         strict_soccerdata=strict_soccerdata,
-        mirror_csv_source=fbref_mirror_csv,
+        mirror_csv_source=mirror_csv_source,
     )
 
     if min_fbref_rows > 0 and len(fbref_df) < min_fbref_rows:
@@ -91,28 +126,49 @@ def run_phase1_pipeline(
     joined_df.to_csv(joined_output, index=False)
     unmatched_df.to_csv(unmatched_output, index=False)
 
+    database_output = save_phase1_data(
+        db_path=db_path,
+        fbref_df=fbref_df,
+        fees_df=fees_df,
+        injuries_df=injuries_df,
+        transfermarkt_df=transfermarkt_df,
+        joined_df=joined_df,
+        unmatched_df=unmatched_df,
+    )
+
     return {
         "fbref_cache": raw_directory / f"fbref_{league.lower()}_{season}_players.csv",
         "transfermarkt_fees_template": fees_path,
         "transfermarkt_injuries_template": injuries_path,
         "joined_output": joined_output,
         "unmatched_output": unmatched_output,
+        "database_output": database_output,
     }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Phase 1 FootValue pipeline")
+    parser.add_argument("--league", type=str, default="EPL", help="League code (currently EPL supported)")
+    parser.add_argument("--season", type=str, default="2022-2023", help="Season label, e.g. 2022-2023 or 2024-2025")
     parser.add_argument("--strict-soccerdata", action="store_true", help="Fail if soccerdata cannot be used")
     parser.add_argument("--force-refresh-fbref", action="store_true", help="Ignore FBref cache and fetch fresh data")
     parser.add_argument("--fbref-mirror-csv", type=str, default=None, help="Path or URL to mirror CSV when FBref blocks requests")
+    parser.add_argument("--auto-fbref-mirror", action="store_true", help="Use newest CSV from incoming directory as mirror source")
+    parser.add_argument("--incoming-dir", type=str, default="src/data/raw/incoming", help="Incoming directory for auto mirror discovery")
     parser.add_argument("--min-fbref-rows", type=int, default=0, help="Fail if FBref rows are below this threshold")
+    parser.add_argument("--db-path", type=str, default="src/data/footvalue.db", help="SQLite database output path")
     args = parser.parse_args()
 
     outputs = run_phase1_pipeline(
+        league=args.league,
+        season=args.season,
         strict_soccerdata=args.strict_soccerdata,
         force_refresh_fbref=args.force_refresh_fbref,
         fbref_mirror_csv=args.fbref_mirror_csv,
+        auto_fbref_mirror=args.auto_fbref_mirror,
+        incoming_dir=args.incoming_dir,
         min_fbref_rows=args.min_fbref_rows,
+        db_path=args.db_path,
     )
     for key, path in outputs.items():
         print(f"{key}: {path}")

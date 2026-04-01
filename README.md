@@ -9,7 +9,7 @@ Start narrow: **EPL 2022/23 only**.
 - Source 1: FBref player stats (scraped + cached)
 - Source 2: Transfermarkt fees + injury history (starter CSV templates)
 - Join key: fuzzy player name matching + manual corrections
-- Output: joined and unmatched CSVs in `src/data/processed`
+- Output: joined and unmatched CSVs in `src/data/processed` + SQLite DB in `src/data/footvalue.db`
 
 ### Current structure
 ```
@@ -59,6 +59,37 @@ make venv312
 make install312
 make test
 make phase1-soccerdata-strict
+make phase1-db
+make kaggle-import DATASET=owner/dataset
+make phase1-season SEASON=2024-2025 MIRROR=/absolute/path/to/file.csv
+make phase1-season-auto SEASON=2024-2025
+```
+
+### Kaggle import flow (for 2024-2025)
+1. Configure Kaggle API credentials (`~/.kaggle/kaggle.json`).
+2. Import dataset files into `src/data/raw/incoming`.
+3. Run the pipeline with explicit season and mirror path.
+
+```bash
+source .venv312/bin/activate
+python -m src.data.kaggle_import --dataset owner/dataset --output-dir src/data/raw/incoming --backend kagglehub
+python -m src.pipeline_phase1 --season 2024-2025 --strict-soccerdata --force-refresh-fbref --fbref-mirror-csv /absolute/path/to/imported_2024_2025.csv --min-fbref-rows 400 --db-path src/data/footvalue.db
+```
+
+Auto-detect latest imported CSV (no filename typing):
+
+```bash
+source .venv312/bin/activate
+python -m src.pipeline_phase1 --season 2024-2025 --strict-soccerdata --force-refresh-fbref --auto-fbref-mirror --incoming-dir src/data/raw/incoming --min-fbref-rows 400 --db-path src/data/footvalue.db
+```
+
+If you want to use your exact snippet style, this is now supported through `kagglehub`:
+
+```python
+import kagglehub
+
+path = kagglehub.dataset_download("eduardopalmieri/premier-league-player-stats-season-2425")
+print("Path to dataset files:", path)
 ```
 
 ### Strict mode with mirror CSV fallback
@@ -95,6 +126,8 @@ Then open:
 API endpoint:
 - `http://127.0.0.1:8000/api/players?source=raw`
 - `http://127.0.0.1:8000/api/players?source=joined`
+
+The frontend now reads from SQLite first (`src/data/footvalue.db`) and falls back to CSV if DB is missing.
 
 ### What the first run does
 1. Scrapes FBref EPL 2022/23 player stats and caches to `src/data/raw`.
